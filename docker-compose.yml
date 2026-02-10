@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: emergency-blood-api
+    ports:
+      - "1000:1000"
+    env_file:
+      - .env
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /root/service_account.json
+    volumes:
+      - ./service_account.json:/root/service_account.json:ro
+      - ./.env:/root/.env
+    restart: unless-stopped
+    networks:
+      - blood-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  blood-network:
+    driver: bridge
