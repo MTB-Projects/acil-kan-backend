@@ -52,6 +52,7 @@ const (
 	// General Errors (9xxx)
 	ErrCodeInternalError    = "GENERAL_9001"
 	ErrCodeServiceUnavailable = "GENERAL_9002"
+	ErrCodeTooManyRequests    = "GENERAL_9003"
 	ErrCodeUnknownError     = "GENERAL_9999"
 )
 
@@ -105,6 +106,7 @@ var ErrorMessages = map[string]string{
 	// General
 	ErrCodeInternalError:    "Internal server error",
 	ErrCodeServiceUnavailable: "Service temporarily unavailable",
+	ErrCodeTooManyRequests:    "Too many requests, please slow down",
 	ErrCodeUnknownError:     "An unknown error occurred",
 }
 

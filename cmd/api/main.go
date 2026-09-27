@@ -82,7 +82,7 @@ func main() {
 			return c.Path() == "/health"
 		},
 		LimitReached: func(c *fiber.Ctx) error {
-			return response.TooManyRequests(c, appErrors.ErrCodeRequestLimitExceeded, "Too many requests, please slow down")
+			return response.TooManyRequests(c, appErrors.ErrCodeTooManyRequests, appErrors.ErrorMessages[appErrors.ErrCodeTooManyRequests])
 		},
 	}))
 	// Mobile clients don't send Origin, so CORS only matters for browsers.
