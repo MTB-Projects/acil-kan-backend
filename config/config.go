@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strconv"
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go/v4"
@@ -13,13 +14,14 @@ import (
 )
 
 type Config struct {
-	Port                      string
-	Env                       string
-	FirebaseProjectID         string
-	MaxRequestsPerUserPerHour int
-	FirebaseApp               *firebase.App
-	FirebaseAuth              *auth.Client
-	FirestoreClient           *firestore.Client
+	Port               string
+	Env                string
+	FirebaseProjectID  string
+	CORSAllowOrigins   string
+	RateLimitPerMinute int
+	FirebaseApp        *firebase.App
+	FirebaseAuth       *auth.Client
+	FirestoreClient    *firestore.Client
 }
 
 var AppConfig *Config
@@ -42,18 +44,16 @@ func LoadConfig() (*Config, error) {
 
 	ctx := context.Background()
 
-	// Initialize Firebase Admin SDK
-	var opt option.ClientOption
+	// Initialize Firebase Admin SDK. Without a credentials file, Application
+	// Default Credentials are used (Cloud Run, GKE, gcloud auth ...).
+	var opts []option.ClientOption
 	if credPath != "" {
-		opt = option.WithCredentialsFile(credPath)
-	} else {
-		// Use default credentials (for Cloud Run, GKE, etc.)
-		opt = option.WithCredentialsFile("")
+		opts = append(opts, option.WithCredentialsFile(credPath))
 	}
 
 	app, err := firebase.NewApp(ctx, &firebase.Config{
 		ProjectID: projectID,
-	}, opt)
+	}, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -71,13 +71,14 @@ func LoadConfig() (*Config, error) {
 	}
 
 	config := &Config{
-		Port:                      port,
-		Env:                       env,
-		FirebaseProjectID:         projectID,
-		MaxRequestsPerUserPerHour: 5,
-		FirebaseApp:               app,
-		FirebaseAuth:              authClient,
-		FirestoreClient:           firestoreClient,
+		Port:               port,
+		Env:                env,
+		FirebaseProjectID:  projectID,
+		CORSAllowOrigins:   getEnv("CORS_ALLOW_ORIGINS", "*"),
+		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 60),
+		FirebaseApp:        app,
+		FirebaseAuth:       authClient,
+		FirestoreClient:    firestoreClient,
 	}
 
 	AppConfig = config
@@ -87,6 +88,13 @@ func LoadConfig() (*Config, error) {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if n, err := strconv.Atoi(os.Getenv(key)); err == nil && n > 0 {
+		return n
 	}
 	return defaultValue
 }

@@ -130,9 +130,15 @@ Returns API health status (no authentication required)
 
 #### Get Active Blood Requests
 ```
-GET /api/v1/public/requests
+GET /api/v1/public/requests?city=İstanbul&district=Kadıköy&blood_type=A+
 ```
-Returns all active blood donation requests
+Returns active blood donation requests. **No personal data** (patient name, contact phone,
+hospital address, user IDs) is included; use `GET /api/v1/requests/:id` when logged in.
+
+### Blood type format
+
+The API uses `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`. Inputs such as `A Rh+` or
+`0 Rh-` are accepted and normalized; anything else returns `VALIDATION_4002`.
 
 ### Protected Endpoints (Require Authentication)
 
@@ -180,7 +186,10 @@ Content-Type: application/json
 {
   "patient_name": "Jane Doe",
   "blood_type": "A+",
-  "city": "Istanbul",
+  "product_type": "WHOLE_BLOOD",
+  "urgency": "CRITICAL",
+  "city": "İstanbul",
+  "district": "Kadıköy",
   "hospital_name": "City Hospital",
   "hospital_address": "123 Main St",
   "contact_phone": "+905551234567",
@@ -188,6 +197,16 @@ Content-Type: application/json
   "description": "Urgent need for surgery"
 }
 ```
+- `product_type` (optional, default `WHOLE_BLOOD`): `WHOLE_BLOOD`, `ERYTHROCYTE`, `THROMBOCYTE`, `PLASMA`, `GRANULOCYTE`
+- `urgency` (optional, default `NORMAL`): `NORMAL`, `HIGH`, `CRITICAL`
+- A push notification is sent to donors of **every compatible blood type** in the same city
+  (e.g. an `A+` request reaches `A+`, `A-`, `O+`, `O-` donors).
+
+**Get Request With Contact Details**
+```
+GET /api/v1/requests/:id
+```
+Returns an active request including `patient_name`, `hospital_address` and `contact_phone`.
 
 **Get My Requests**
 ```
@@ -202,7 +221,9 @@ DELETE /api/v1/requests/:id
 ## 🔒 Security Features
 
 - **Firebase Token Verification**: All protected endpoints verify Firebase ID tokens
-- **Rate Limiting**: Maximum 3 blood requests per user per day
+- **Rate Limiting**: Maximum 3 blood requests per user per rolling 24 hours (cancelled ones included), plus a per-IP limit (`RATE_LIMIT_PER_MINUTE`)
+- **No Personal Data in Public Responses or Push Payloads**
+- **Secrets**: the service account key is mounted at runtime, never committed or baked into the Docker image
 - **Authorization Checks**: Users can only modify their own requests
 - **Input Validation**: Comprehensive validation on all inputs
 - **Structured Logging**: All actions logged with user context

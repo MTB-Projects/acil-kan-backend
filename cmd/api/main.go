@@ -19,6 +19,7 @@ import (
 	"acilkan.backend/pkg/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"go.uber.org/zap"
 )
@@ -68,12 +69,26 @@ func main() {
 	app := fiber.New(fiber.Config{
 		AppName:      "Emergency Blood Donation API",
 		ErrorHandler: customErrorHandler,
+		BodyLimit:    64 * 1024,
 	})
 
 	// Global middleware
 	app.Use(recover.New())
+	// Per-IP rate limit as a basic abuse guard
+	app.Use(limiter.New(limiter.Config{
+		Max:        cfg.RateLimitPerMinute,
+		Expiration: time.Minute,
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() == "/health"
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return response.TooManyRequests(c, appErrors.ErrCodeRequestLimitExceeded, "Too many requests, please slow down")
+		},
+	}))
+	// Mobile clients don't send Origin, so CORS only matters for browsers.
+	// Restrict via CORS_ALLOW_ORIGINS in production (comma separated).
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
+		AllowOrigins: cfg.CORSAllowOrigins,
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
@@ -155,8 +170,13 @@ func customErrorHandler(c *fiber.Ctx, err error) error {
 		zap.Error(err),
 	)
 
+	// Don't leak internal error details to clients; Fiber errors (404, 405...) are safe to show
+	message := appErrors.ErrorMessages[appErrors.ErrCodeInternalError]
+	if e, ok := err.(*fiber.Error); ok && code < fiber.StatusInternalServerError {
+		message = e.Message
+	}
 	return response.Error(c, code, &response.ErrorInfo{
 		Code:    appErrors.ErrCodeInternalError,
-		Message: err.Error(),
+		Message: message,
 	})
 }

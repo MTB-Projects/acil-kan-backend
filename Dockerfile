@@ -29,16 +29,12 @@ RUN apk --no-cache add ca-certificates
 # Copy the binary from builder
 COPY --from=builder /app/build/emergency-blood-api .
 
-# Copy Firebase service account JSON
-COPY service_account.json .
-
 # Expose port
 EXPOSE 8080
 
 # Set environment variables
 ENV PORT=8080
 ENV ENV=production
-ENV GOOGLE_APPLICATION_CREDENTIALS=/root/service_account.json
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

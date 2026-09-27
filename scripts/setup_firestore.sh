@@ -35,94 +35,16 @@ else
 fi
 echo ""
 
-# firestore.indexes.json dosyası oluştur
-cat > firestore.indexes.json << 'EOF'
-{
-  "indexes": [
-    {
-      "collectionGroup": "blood_requests",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "expires_at",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "blood_requests",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "requester_uid",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "created_at",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "blood_requests",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "requester_uid",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "created_at",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "users",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "is_donor",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "city",
-          "order": "ASCENDING"
-        }
-      ]
-    }
-  ],
-  "fieldOverrides": []
-}
-EOF
-
-echo "📝 firestore.indexes.json oluşturuldu"
+# firestore.indexes.json repoda tutuluyor (sorgularla birlikte güncellenmeli)
+if [ ! -f "firestore.indexes.json" ]; then
+    echo "❌ firestore.indexes.json bulunamadı"
+    exit 1
+fi
+echo "📝 firestore.indexes.json kullanılıyor"
 echo ""
 
-# firestore.rules dosyası oluştur
-cat > firestore.rules << 'EOF'
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Backend-only access
-    // Mobile clients cannot access Firestore directly
-    // All operations must go through the Go backend API
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
-EOF
-
-echo "🔐 firestore.rules oluşturuldu"
+# firestore.rules repoda tutuluyor
+echo "🔐 firestore.rules kullanılıyor"
 echo ""
 
 echo "📤 Firebase'e deploy ediliyor..."

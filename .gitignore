@@ -21,6 +21,7 @@ serviceAccountKey.json
 *.json
 !go.mod
 !go.sum
+!firestore.indexes.json
 
 # IDE
 .idea/

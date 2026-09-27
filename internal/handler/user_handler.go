@@ -24,11 +24,7 @@ func (h *UserHandler) GetProfile(c *fiber.Ctx) error {
 
 	user, err := h.userService.GetOrCreateUser(c.Context(), uid, email)
 	if err != nil {
-		if appErrors.IsAppError(err) {
-			appErr := appErrors.GetAppError(err)
-			return response.InternalServerError(c, appErr.Code, appErr.Message)
-		}
-		return response.InternalServerError(c, appErrors.ErrCodeInternalError, "Failed to get user profile")
+		return writeError(c, err, appErrors.ErrCodeInternalError)
 	}
 
 	return response.Success(c, user)
@@ -46,11 +42,7 @@ func (h *UserHandler) UpdateProfile(c *fiber.Ctx) error {
 
 	user, err := h.userService.UpdateProfile(c.Context(), uid, updates)
 	if err != nil {
-		if appErrors.IsAppError(err) {
-			appErr := appErrors.GetAppError(err)
-			return response.BadRequest(c, appErr.Code, appErr.Message)
-		}
-		return response.InternalServerError(c, appErrors.ErrCodeUserUpdateFailed, "Failed to update profile")
+		return writeError(c, err, appErrors.ErrCodeUserUpdateFailed)
 	}
 
 	return response.Success(c, user)
@@ -74,11 +66,7 @@ func (h *UserHandler) UpdateFCMToken(c *fiber.Ctx) error {
 	}
 
 	if err := h.userService.UpdateFCMToken(c.Context(), uid, req.Token); err != nil {
-		if appErrors.IsAppError(err) {
-			appErr := appErrors.GetAppError(err)
-			return response.BadRequest(c, appErr.Code, appErr.Message)
-		}
-		return response.InternalServerError(c, appErrors.ErrCodeInternalError, "Failed to update FCM token")
+		return writeError(c, err, appErrors.ErrCodeInternalError)
 	}
 
 	return response.Success(c, fiber.Map{

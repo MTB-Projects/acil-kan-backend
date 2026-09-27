@@ -61,6 +61,7 @@ func setupRequestRoutes(protected fiber.Router, requestHandler *handler.RequestH
 
 	requests.Post("", requestHandler.CreateRequest)
 	requests.Get("/my", requestHandler.GetMyRequests)
+	requests.Get("/:id", requestHandler.GetRequest)
 	requests.Delete("/:id", requestHandler.CancelRequest)
 }
 

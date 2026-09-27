@@ -156,14 +156,11 @@ func (r *BloodRequestRepository) GetUserRequests(ctx context.Context, uid string
 	return requests, nil
 }
 
-// CountUserActiveRequestsToday counts how many active requests a user has created today
-func (r *BloodRequestRepository) CountUserActiveRequestsToday(ctx context.Context, uid string) (int, error) {
-	startOfDay := time.Now().Truncate(24 * time.Hour)
-
+// CountUserRequestsSince counts how many requests (in any status) a user has created since the given time
+func (r *BloodRequestRepository) CountUserRequestsSince(ctx context.Context, uid string, since time.Time) (int, error) {
 	iter := r.db.Collection("blood_requests").
 		Where("requester_uid", "==", uid).
-		Where("status", "==", string(model.RequestStatusActive)).
-		Where("created_at", ">=", startOfDay).
+		Where("created_at", ">=", since).
 		Documents(ctx)
 
 	count := 0

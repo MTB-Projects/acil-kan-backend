@@ -19,179 +19,151 @@ func NewFCMClient(client *messaging.Client) *FCMClient {
 	return &FCMClient{client: client}
 }
 
-// GenerateTopicName generates a topic name based on blood type, city, and optional district
-// Format: blood_<BLOOD_TYPE>_<CITY>_<DISTRICT> (if district provided)
-//         blood_<BLOOD_TYPE>_<CITY> (if no district)
-// Example: blood_APlus_Istanbul_Kadikoy, blood_APlus_Istanbul
-func GenerateTopicName(bloodType model.BloodType, city string, district ...string) string {
-	// Replace + with Plus for topic name (Firebase topic names can't have +)
-	cleanBloodType := strings.ReplaceAll(string(bloodType), "+", "Plus")
-	cleanBloodType = strings.ReplaceAll(cleanBloodType, "-", "Minus")
-	cleanCity := strings.ReplaceAll(city, " ", "_")
-	
-	topicName := fmt.Sprintf("blood_%s_%s", cleanBloodType, cleanCity)
-	
-	// Add district if provided
-	if len(district) > 0 && district[0] != "" {
-		cleanDistrict := strings.ReplaceAll(district[0], " ", "_")
-		topicName = fmt.Sprintf("%s_%s", topicName, cleanDistrict)
+var turkishReplacer = strings.NewReplacer(
+	"ç", "c", "Ç", "c",
+	"ğ", "g", "Ğ", "g",
+	"ı", "i", "I", "i", "İ", "i",
+	"ö", "o", "Ö", "o",
+	"ş", "s", "Ş", "s",
+	"ü", "u", "Ü", "u",
+)
+
+// Slug converts a place name into a lowercase ASCII token that is valid in an
+// FCM topic name ([a-zA-Z0-9-_.~%]+). "İstanbul" and "istanbul" map to the same slug.
+func Slug(s string) string {
+	s = turkishReplacer.Replace(strings.TrimSpace(s))
+	s = strings.ToLower(s)
+
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+		} else if !lastUnderscore && b.Len() > 0 {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
 	}
-	
-	return topicName
+	return strings.TrimSuffix(b.String(), "_")
 }
 
-// SubscribeToTopics subscribes a user's FCM token to relevant topics
-// Uses hierarchical topic structure for better targeting:
-// 1. Specific: blood_APlus_Istanbul_Kadikoy (district-level)
-// 2. City-wide: blood_APlus_Istanbul (city-level for same blood type)
-// 3. General: city_Istanbul (all blood requests in city)
-func (f *FCMClient) SubscribeToTopics(ctx context.Context, fcmToken string, bloodType model.BloodType, city, district string) error {
+func bloodTypeToken(bloodType model.BloodType) string {
+	t := strings.ReplaceAll(string(bloodType), "+", "pos")
+	return strings.ToLower(strings.ReplaceAll(t, "-", "neg"))
+}
+
+// GenerateTopicName returns the city-level topic for donors of a blood type.
+// Example: ("A+", "İstanbul") -> "blood_apos_istanbul"
+func GenerateTopicName(bloodType model.BloodType, city string) string {
+	return fmt.Sprintf("blood_%s_%s", bloodTypeToken(bloodType), Slug(city))
+}
+
+// CityTopicName returns the topic every donor in a city is subscribed to.
+func CityTopicName(city string) string {
+	return fmt.Sprintf("city_%s", Slug(city))
+}
+
+func donorTopics(bloodType model.BloodType, city string) []string {
+	return []string{CityTopicName(city), GenerateTopicName(bloodType, city)}
+}
+
+// SubscribeToTopics subscribes a donor's FCM token to the city topic and
+// their own blood type topic in that city.
+func (f *FCMClient) SubscribeToTopics(ctx context.Context, fcmToken string, bloodType model.BloodType, city string) error {
 	if fcmToken == "" {
 		return fmt.Errorf("FCM token is required")
 	}
 
-	topics := []string{
-		fmt.Sprintf("city_%s", strings.ReplaceAll(city, " ", "_")), // General city topic
-		GenerateTopicName(bloodType, city),                          // City-wide blood type topic
-	}
-	
-	// Add district-specific topic if district is provided
-	if district != "" {
-		topics = append(topics, GenerateTopicName(bloodType, city, district))
-	}
-
-	for _, topic := range topics {
-		_, err := f.client.SubscribeToTopic(ctx, []string{fcmToken}, topic)
-		if err != nil {
-			logger.Error("Failed to subscribe to topic",
-				zap.String("topic", topic),
-				zap.Error(err),
-			)
+	for _, topic := range donorTopics(bloodType, city) {
+		if _, err := f.client.SubscribeToTopic(ctx, []string{fcmToken}, topic); err != nil {
+			logger.Error("Failed to subscribe to topic", zap.String("topic", topic), zap.Error(err))
 			return err
 		}
-		logger.Info("Subscribed to topic",
-			zap.String("topic", topic),
-		)
+		logger.Info("Subscribed to topic", zap.String("topic", topic))
 	}
-
 	return nil
 }
 
-// UnsubscribeFromTopics unsubscribes a user from all topics
-func (f *FCMClient) UnsubscribeFromTopics(ctx context.Context, fcmToken string, bloodType model.BloodType, city, district string) error {
+// UnsubscribeFromTopics removes a token from the topics SubscribeToTopics added
+func (f *FCMClient) UnsubscribeFromTopics(ctx context.Context, fcmToken string, bloodType model.BloodType, city string) error {
 	if fcmToken == "" {
 		return fmt.Errorf("FCM token is required")
 	}
 
-	topics := []string{
-		fmt.Sprintf("city_%s", strings.ReplaceAll(city, " ", "_")),
-		GenerateTopicName(bloodType, city),
-	}
-	
-	// Add district-specific topic if district is provided
-	if district != "" {
-		topics = append(topics, GenerateTopicName(bloodType, city, district))
-	}
-
-	for _, topic := range topics {
-		_, err := f.client.UnsubscribeFromTopic(ctx, []string{fcmToken}, topic)
-		if err != nil {
-			logger.Error("Failed to unsubscribe from topic",
-				zap.String("topic", topic),
-				zap.Error(err),
-			)
+	for _, topic := range donorTopics(bloodType, city) {
+		if _, err := f.client.UnsubscribeFromTopic(ctx, []string{fcmToken}, topic); err != nil {
+			logger.Error("Failed to unsubscribe from topic", zap.String("topic", topic), zap.Error(err))
 			return err
 		}
-		logger.Info("Unsubscribed from topic",
-			zap.String("topic", topic),
-		)
+		logger.Info("Unsubscribed from topic", zap.String("topic", topic))
 	}
-
 	return nil
 }
 
-// SendBloodRequestNotificationToTopic sends notification to a topic
-// This is much more scalable than sending to individual tokens
-// Sends to the most specific topic available (district-level if district is set, otherwise city-level)
+// RecipientTopics returns the topics that should receive a request:
+// the city-level topic of every donor blood type compatible with the request.
+func RecipientTopics(request *model.BloodRequest) []string {
+	var topics []string
+	for _, donorType := range model.CompatibleDonorTypes(request.BloodType) {
+		topics = append(topics, GenerateTopicName(donorType, request.City))
+	}
+	return topics
+}
+
+// SendBloodRequestNotificationToTopic notifies every compatible donor in the request's city.
+// Topic payloads can be read by any subscriber, so no personal data is included;
+// the app fetches contact details from the authenticated API.
 func (f *FCMClient) SendBloodRequestNotificationToTopic(ctx context.Context, request *model.BloodRequest) error {
-	// Use district-specific topic if available, otherwise city-wide topic
-	var topic string
-	if request.District != "" {
-		topic = GenerateTopicName(request.BloodType, request.City, request.District)
-	} else {
-		topic = GenerateTopicName(request.BloodType, request.City)
-	}
-
-	message := &messaging.Message{
-		Topic: topic,
-		Notification: &messaging.Notification{
-			Title: fmt.Sprintf("Acil %s Kan İhtiyacı!", request.BloodType),
-			Body:  fmt.Sprintf("%s - %s hastanesinde kan ihtiyacı var", request.City, request.HospitalName),
-		},
-		Data: map[string]string{
-			"type":             "blood_request",
-			"request_id":       request.ID,
-			"blood_type":       string(request.BloodType),
-			"city":             request.City,
-			"hospital_name":    request.HospitalName,
-			"hospital_address": request.HospitalAddress,
-			"contact_phone":    request.ContactPhone,
-		},
-		Android: &messaging.AndroidConfig{
-			Priority: "high",
-		},
-		APNS: &messaging.APNSConfig{
-			Headers: map[string]string{
-				"apns-priority": "10",
+	var messages []*messaging.Message
+	for _, topic := range RecipientTopics(request) {
+		messages = append(messages, &messaging.Message{
+			Topic: topic,
+			Notification: &messaging.Notification{
+				Title: fmt.Sprintf("Acil %s Kan İhtiyacı!", request.BloodType),
+				Body:  fmt.Sprintf("%s - %s hastanesinde kan ihtiyacı var", request.City, request.HospitalName),
 			},
-		},
+			Data: map[string]string{
+				"type":          "blood_request",
+				"request_id":    request.ID,
+				"blood_type":    string(request.BloodType),
+				"city":          request.City,
+				"hospital_name": request.HospitalName,
+			},
+			Android: &messaging.AndroidConfig{
+				Priority: "high",
+			},
+			APNS: &messaging.APNSConfig{
+				Headers: map[string]string{
+					"apns-priority": "10",
+				},
+			},
+		})
 	}
 
-	_, err := f.client.Send(ctx, message)
+	resp, err := f.client.SendEach(ctx, messages)
 	if err != nil {
-		logger.Error("Failed to send topic notification",
-			zap.String("topic", topic),
-			zap.Error(err),
-		)
+		logger.Error("Failed to send topic notifications", zap.String("request_id", request.ID), zap.Error(err))
 		return err
 	}
 
-	logger.Info("Blood request notification sent to topic",
-		zap.String("topic", topic),
-		zap.String("request_id", request.ID),
-	)
-
-	return nil
-}
-
-// SendBloodRequestNotification sends a notification about a new blood request to individual token
-// Deprecated: Use SendBloodRequestNotificationToTopic for better scalability
-func (f *FCMClient) SendBloodRequestNotification(ctx context.Context, fcmToken string, request *model.BloodRequest) error {
-	message := &messaging.Message{
-		Token: fcmToken,
-		Notification: &messaging.Notification{
-			Title: fmt.Sprintf("Acil %s Kan İhtiyacı!", request.BloodType),
-			Body:  fmt.Sprintf("%s - %s hastanesinde kan ihtiyacı var", request.City, request.HospitalName),
-		},
-		Data: map[string]string{
-			"type":             "blood_request",
-			"request_id":       request.ID,
-			"blood_type":       string(request.BloodType),
-			"city":             request.City,
-			"hospital_name":    request.HospitalName,
-			"hospital_address": request.HospitalAddress,
-			"contact_phone":    request.ContactPhone,
-		},
-		Android: &messaging.AndroidConfig{
-			Priority: "high",
-		},
-		APNS: &messaging.APNSConfig{
-			Headers: map[string]string{
-				"apns-priority": "10",
-			},
-		},
+	for i, r := range resp.Responses {
+		if !r.Success {
+			logger.Error("Topic notification failed",
+				zap.String("topic", messages[i].Topic),
+				zap.String("request_id", request.ID),
+				zap.Error(r.Error),
+			)
+		}
+	}
+	if resp.FailureCount == len(messages) {
+		return fmt.Errorf("all %d topic notifications failed", len(messages))
 	}
 
-	_, err := f.client.Send(ctx, message)
-	return err
+	logger.Info("Blood request notifications sent",
+		zap.String("request_id", request.ID),
+		zap.Int("topics", len(messages)),
+		zap.Int("failed", resp.FailureCount),
+	)
+	return nil
 }

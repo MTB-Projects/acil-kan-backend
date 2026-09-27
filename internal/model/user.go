@@ -67,26 +67,5 @@ func (u *User) HasRole(role UserRole) bool {
 
 // IsCompatibleDonor checks if this user can donate to a specific blood type
 func (u *User) IsCompatibleDonor(recipientBloodType BloodType) bool {
-	compatibility := map[BloodType][]BloodType{
-		BloodTypeONegative:  {BloodTypeONegative, BloodTypeOPositive, BloodTypeANegative, BloodTypeAPositive, BloodTypeBNegative, BloodTypeBPositive, BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeOPositive:  {BloodTypeOPositive, BloodTypeAPositive, BloodTypeBPositive, BloodTypeABPositive},
-		BloodTypeANegative:  {BloodTypeANegative, BloodTypeAPositive, BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeAPositive:  {BloodTypeAPositive, BloodTypeABPositive},
-		BloodTypeBNegative:  {BloodTypeBNegative, BloodTypeBPositive, BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeBPositive:  {BloodTypeBPositive, BloodTypeABPositive},
-		BloodTypeABNegative: {BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeABPositive: {BloodTypeABPositive},
-	}
-
-	compatibleTypes, exists := compatibility[u.BloodType]
-	if !exists {
-		return false
-	}
-
-	for _, compatible := range compatibleTypes {
-		if compatible == recipientBloodType {
-			return true
-		}
-	}
-	return false
+	return u.BloodType.CanDonateTo(recipientBloodType)
 }
