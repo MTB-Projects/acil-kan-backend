@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"acilkan.backend/internal/model"
 	"acilkan.backend/internal/notification"
@@ -97,6 +98,13 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, updates map
 	}
 	if district, ok := updates["district"].(string); ok {
 		user.District = strings.TrimSpace(district)
+	}
+	if raw, ok := updates["last_donation_date"]; ok {
+		date, err := ParseDonationDate(raw, time.Now())
+		if err != nil {
+			return nil, appErrors.NewWithMessage(appErrors.ErrCodeInvalidUserData, err.Error())
+		}
+		user.LastDonationDate = date
 	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {

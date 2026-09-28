@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"acilkan.backend/internal/model"
 	appErrors "acilkan.backend/pkg/errors"
@@ -55,6 +56,30 @@ func TestCreateRequestInputValidate(t *testing.T) {
 		err := in.Validate()
 		if err == nil || appErrors.GetAppError(err).Code != wantCode {
 			t.Errorf("want %s, got %v", wantCode, err)
+		}
+	}
+}
+
+func TestParseDonationDate(t *testing.T) {
+	now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+
+	for _, clear := range []interface{}{nil, "", "  "} {
+		if d, err := ParseDonationDate(clear, now); err != nil || d != nil {
+			t.Errorf("ParseDonationDate(%q) = %v, %v; want nil, nil", clear, d, err)
+		}
+	}
+
+	d, err := ParseDonationDate("2026-06-01", now)
+	if err != nil || d == nil || d.Format("2006-01-02") != "2026-06-01" {
+		t.Errorf("date-only: got %v, %v", d, err)
+	}
+	if _, err := ParseDonationDate("2026-06-01T10:00:00Z", now); err != nil {
+		t.Errorf("RFC3339: %v", err)
+	}
+
+	for _, bad := range []interface{}{"2026-10-01", "1900-01-01", "01.06.2026", 42} {
+		if _, err := ParseDonationDate(bad, now); err == nil {
+			t.Errorf("ParseDonationDate(%v) accepted; want error", bad)
 		}
 	}
 }

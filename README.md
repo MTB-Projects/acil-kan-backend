@@ -162,9 +162,12 @@ Content-Type: application/json
   "phone_number": "+905551234567",
   "blood_type": "A+",
   "city": "Istanbul",
-  "is_donor": true
+  "is_donor": true,
+  "last_donation_date": "2026-06-01"
 }
 ```
+`last_donation_date` is optional (`YYYY-MM-DD`, not in the future; `""` or `null` clears it).
+Donors can donate again 90 days after it.
 
 **Update FCM Token**
 ```
