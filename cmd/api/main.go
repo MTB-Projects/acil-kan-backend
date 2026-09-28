@@ -10,6 +10,7 @@ import (
 
 	"acilkan.backend/config"
 	"acilkan.backend/internal/handler"
+	"acilkan.backend/internal/hospital"
 	"acilkan.backend/internal/notification"
 	"acilkan.backend/internal/repository"
 	"acilkan.backend/internal/router"
@@ -65,6 +66,14 @@ func main() {
 	userHandler := handler.NewUserHandler(userService)
 	requestHandler := handler.NewRequestHandler(donationService)
 
+	// Hospital directory (embedded OpenStreetMap data)
+	hospitals, err := hospital.Load()
+	if err != nil {
+		logger.Fatal("Failed to load hospital directory", zap.Error(err))
+	}
+	logger.Info("Hospital directory loaded", zap.Int("hospitals", hospitals.Len()))
+	hospitalHandler := handler.NewHospitalHandler(hospitals)
+
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "Emergency Blood Donation API",
@@ -104,7 +113,7 @@ func main() {
 	app.Use(logger.HTTPMiddleware())
 
 	// Setup all routes
-	router.SetupRoutes(app, cfg, userHandler, requestHandler)
+	router.SetupRoutes(app, cfg, userHandler, requestHandler, hospitalHandler)
 
 	// Start server in a goroutine
 	go func() {

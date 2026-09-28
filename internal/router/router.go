@@ -12,7 +12,7 @@ import (
 const APIVersion = "v1"
 
 // SetupRoutes configures all application routes
-func SetupRoutes(app *fiber.App, cfg *config.Config, userHandler *handler.UserHandler, requestHandler *handler.RequestHandler) {
+func SetupRoutes(app *fiber.App, cfg *config.Config, userHandler *handler.UserHandler, requestHandler *handler.RequestHandler, hospitalHandler *handler.HospitalHandler) {
 	// Health check endpoint (no auth required)
 	app.Get("/health", healthCheckHandler)
 
@@ -20,18 +20,21 @@ func SetupRoutes(app *fiber.App, cfg *config.Config, userHandler *handler.UserHa
 	v1 := app.Group(fmt.Sprintf("/api/%s", APIVersion))
 
 	// Public routes (no authentication required)
-	setupPublicRoutes(v1, requestHandler)
+	setupPublicRoutes(v1, requestHandler, hospitalHandler)
 
 	// Protected routes (require Firebase authentication)
 	setupProtectedRoutes(v1, cfg, userHandler, requestHandler)
 }
 
 // setupPublicRoutes configures public endpoints
-func setupPublicRoutes(v1 fiber.Router, requestHandler *handler.RequestHandler) {
+func setupPublicRoutes(v1 fiber.Router, requestHandler *handler.RequestHandler, hospitalHandler *handler.HospitalHandler) {
 	public := v1.Group("/public")
 
 	// Blood requests - public read access
 	public.Get("/requests", requestHandler.GetActiveRequests)
+
+	// Hospital directory for autocomplete (OpenStreetMap data, no personal data)
+	public.Get("/hospitals", hospitalHandler.SearchHospitals)
 }
 
 // setupProtectedRoutes configures authenticated endpoints

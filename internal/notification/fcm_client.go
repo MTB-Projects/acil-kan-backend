@@ -7,6 +7,7 @@ import (
 
 	"acilkan.backend/internal/model"
 	"acilkan.backend/pkg/logger"
+	"acilkan.backend/pkg/textnorm"
 	"firebase.google.com/go/v4/messaging"
 	"go.uber.org/zap"
 )
@@ -19,33 +20,10 @@ func NewFCMClient(client *messaging.Client) *FCMClient {
 	return &FCMClient{client: client}
 }
 
-var turkishReplacer = strings.NewReplacer(
-	"ç", "c", "Ç", "c",
-	"ğ", "g", "Ğ", "g",
-	"ı", "i", "I", "i", "İ", "i",
-	"ö", "o", "Ö", "o",
-	"ş", "s", "Ş", "s",
-	"ü", "u", "Ü", "u",
-)
-
 // Slug converts a place name into a lowercase ASCII token that is valid in an
 // FCM topic name ([a-zA-Z0-9-_.~%]+). "İstanbul" and "istanbul" map to the same slug.
 func Slug(s string) string {
-	s = turkishReplacer.Replace(strings.TrimSpace(s))
-	s = strings.ToLower(s)
-
-	var b strings.Builder
-	lastUnderscore := false
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			lastUnderscore = false
-		} else if !lastUnderscore && b.Len() > 0 {
-			b.WriteByte('_')
-			lastUnderscore = true
-		}
-	}
-	return strings.TrimSuffix(b.String(), "_")
+	return textnorm.Slug(s)
 }
 
 func bloodTypeToken(bloodType model.BloodType) string {

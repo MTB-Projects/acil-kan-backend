@@ -135,6 +135,15 @@ GET /api/v1/public/requests?city=İstanbul&district=Kadıköy&blood_type=A+
 Returns active blood donation requests. **No personal data** (patient name, contact phone,
 hospital address, user IDs) is included; use `GET /api/v1/requests/:id` when logged in.
 
+#### Search Hospitals (autocomplete)
+```
+GET /api/v1/public/hospitals?city=Ankara&district=Çankaya&q=sehir&limit=20
+```
+Matches the start of any word in the hospital name or district, ignoring case and Turkish
+letters (`sehir` finds "Şehir"). Names that start with the query come first. `district` is optional.
+Data is embedded in the binary from OpenStreetMap (© OpenStreetMap contributors, ODbL);
+regenerate with `node scripts/osm/refresh.js` (also writes the app's `assets/data/districts.json`).
+
 ### Blood type format
 
 The API uses `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`. Inputs such as `A Rh+` or
