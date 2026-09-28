@@ -23,6 +23,7 @@ serviceAccountKey.json
 !go.sum
 !firestore.indexes.json
 !firebase.json
+!internal/hospital/hospitals.json
 
 # IDE
 .idea/
