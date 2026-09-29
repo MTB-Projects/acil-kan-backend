@@ -64,7 +64,7 @@ func main() {
 		log.Fatalf("%s için profil yok; önce uygulamada giriş yapmalı: %v", email, err)
 	}
 
-	op := firestore.ArrayUnion("ADMIN")
+	var op interface{} = firestore.ArrayUnion("ADMIN")
 	if remove {
 		op = firestore.ArrayRemove("ADMIN")
 	}
