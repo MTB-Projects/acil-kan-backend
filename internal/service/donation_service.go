@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"acilkan.backend/internal/model"
@@ -11,10 +12,14 @@ import (
 	"acilkan.backend/pkg/logger"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	MaxRequestsPerDay        = 3
+	// Doğrulanmış kurumlar (hastane kan merkezleri) gün içinde çok sayıda ilan verebilir
+	MaxRequestsPerDayInstitution = 20
 	DefaultRequestExpiration = 48 * time.Hour // 48 hours
 )
 
@@ -54,20 +59,24 @@ func (s *DonationService) CreateRequest(ctx context.Context, uid string, req *Cr
 		return nil, appErrors.ErrIncompleteProfile()
 	}
 
-	// Check spam prevention - max requests per day
-	count, err := s.requestRepo.CountUserActiveRequestsToday(ctx, uid)
+	// Validate input
+	if err := req.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Spam prevention: rolling 24h window, cancelled requests still count
+	count, err := s.requestRepo.CountUserRequestsSince(ctx, uid, time.Now().Add(-24*time.Hour))
 	if err != nil {
 		logger.Error("Failed to count user requests", zap.String("uid", uid), zap.Error(err))
 		return nil, appErrors.Wrap(appErrors.ErrCodeDatabaseError, err)
 	}
-	if count >= MaxRequestsPerDay {
-		logger.Warn("User exceeded daily request limit", zap.String("uid", uid), zap.Int("count", count))
-		return nil, appErrors.ErrRequestLimitExceeded(MaxRequestsPerDay)
+	limit := MaxRequestsPerDay
+	if requester.IsVerifiedInstitution() {
+		limit = MaxRequestsPerDayInstitution
 	}
-
-	// Validate input
-	if err := req.Validate(); err != nil {
-		return nil, appErrors.Wrap(appErrors.ErrCodeInvalidRequestData, err)
+	if count >= limit {
+		logger.Warn("User exceeded daily request limit", zap.String("uid", uid), zap.Int("count", count))
+		return nil, appErrors.ErrRequestLimitExceeded(limit)
 	}
 
 	// Create blood request
@@ -76,7 +85,9 @@ func (s *DonationService) CreateRequest(ctx context.Context, uid string, req *Cr
 		RequesterUID:    uid,
 		RequesterName:   requester.FullName,
 		PatientName:     req.PatientName,
-		BloodType:       model.BloodType(req.BloodType),
+		BloodType:       req.parsedBloodType,
+		ProductType:     model.ProductType(req.ProductType),
+		Urgency:         model.Urgency(req.Urgency),
 		City:            req.City,
 		District:        req.District, // Optional district for more specific targeting
 		HospitalName:    req.HospitalName,
@@ -86,6 +97,9 @@ func (s *DonationService) CreateRequest(ctx context.Context, uid string, req *Cr
 		Description:     req.Description,
 		Status:          model.RequestStatusActive,
 		ExpiresAt:       time.Now().Add(DefaultRequestExpiration),
+	}
+	if requester.IsVerifiedInstitution() {
+		bloodRequest.VerifiedInstitution = requester.Institution.Name
 	}
 
 	if err := s.requestRepo.Create(ctx, bloodRequest); err != nil {
@@ -126,23 +140,60 @@ func (s *DonationService) notifyCompatibleDonors(ctx context.Context, request *m
 
 	logger.Info("Blood request notification sent successfully",
 		zap.String("request_id", request.ID),
-		zap.String("topic", notification.GenerateTopicName(request.BloodType, request.City)),
+		zap.Strings("topics", notification.RecipientTopics(request)),
 	)
 }
 
-// GetActiveRequests retrieves all active blood requests
-func (s *DonationService) GetActiveRequests(ctx context.Context) ([]*model.BloodRequest, error) {
-	return s.requestRepo.GetActiveRequests(ctx)
+// GetActiveRequests retrieves all active blood requests without personal data
+func (s *DonationService) GetActiveRequests(ctx context.Context) ([]*model.PublicBloodRequest, error) {
+	requests, err := s.requestRepo.GetActiveRequests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return toPublic(requests), nil
 }
 
-// GetActiveRequestsWithFilters retrieves active blood requests with optional filters
-func (s *DonationService) GetActiveRequestsWithFilters(ctx context.Context, city, district, bloodType string) ([]*model.BloodRequest, error) {
+// GetActiveRequestsWithFilters retrieves active blood requests with optional filters, without personal data
+func (s *DonationService) GetActiveRequestsWithFilters(ctx context.Context, city, district, bloodType string) ([]*model.PublicBloodRequest, error) {
 	filters := repository.RequestFilters{
-		City:      city,
-		District:  district,
-		BloodType: bloodType,
+		City:     city,
+		District: district,
 	}
-	return s.requestRepo.GetActiveRequestsWithFilters(ctx, filters)
+	if bloodType != "" {
+		bt, ok := model.ParseBloodType(bloodType)
+		if !ok {
+			return nil, appErrors.New(appErrors.ErrCodeInvalidBloodType, nil)
+		}
+		filters.BloodType = string(bt)
+	}
+	requests, err := s.requestRepo.GetActiveRequestsWithFilters(ctx, filters)
+	if err != nil {
+		return nil, err
+	}
+	return toPublic(requests), nil
+}
+
+// GetRequestContact returns an active request with contact details, for authenticated users
+func (s *DonationService) GetRequestContact(ctx context.Context, requestID string) (*model.ContactView, error) {
+	request, err := s.requestRepo.GetByID(ctx, requestID)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, appErrors.ErrRequestNotFound()
+		}
+		return nil, appErrors.Wrap(appErrors.ErrCodeDatabaseError, err)
+	}
+	if !request.IsActive() {
+		return nil, appErrors.New(appErrors.ErrCodeRequestExpired, nil)
+	}
+	return request.ToContactView(), nil
+}
+
+func toPublic(requests []*model.BloodRequest) []*model.PublicBloodRequest {
+	out := make([]*model.PublicBloodRequest, 0, len(requests))
+	for _, r := range requests {
+		out = append(out, r.ToPublic())
+	}
+	return out
 }
 
 // GetUserRequests retrieves all requests created by a user
@@ -180,6 +231,8 @@ func (s *DonationService) CancelRequest(ctx context.Context, uid, requestID stri
 type CreateRequestInput struct {
 	PatientName     string `json:"patient_name"`
 	BloodType       string `json:"blood_type"`
+	ProductType     string `json:"product_type"`
+	Urgency         string `json:"urgency"`
 	City            string `json:"city"`
 	District        string `json:"district,omitempty"` // Optional district for more specific targeting
 	HospitalName    string `json:"hospital_name"`
@@ -187,16 +240,43 @@ type CreateRequestInput struct {
 	ContactPhone    string `json:"contact_phone"`
 	UnitsNeeded     int    `json:"units_needed"`
 	Description     string `json:"description"`
+
+	parsedBloodType model.BloodType
 }
 
-// Validate validates the create request input
+// Validate validates and normalizes the create request input
 func (i *CreateRequestInput) Validate() error {
+	i.PatientName = strings.TrimSpace(i.PatientName)
+	i.City = strings.TrimSpace(i.City)
+	i.District = strings.TrimSpace(i.District)
+	i.HospitalName = strings.TrimSpace(i.HospitalName)
+	i.ContactPhone = strings.TrimSpace(i.ContactPhone)
+
 	if i.PatientName == "" {
 		return appErrors.NewWithMessage(appErrors.ErrCodeMissingRequiredField, "patient name is required")
 	}
 	if i.BloodType == "" {
 		return appErrors.NewWithMessage(appErrors.ErrCodeMissingRequiredField, "blood type is required")
 	}
+	bt, ok := model.ParseBloodType(i.BloodType)
+	if !ok {
+		return appErrors.New(appErrors.ErrCodeInvalidBloodType, nil)
+	}
+	i.parsedBloodType = bt
+
+	if i.ProductType == "" {
+		i.ProductType = string(model.ProductWholeBlood)
+	}
+	if !model.ProductType(i.ProductType).IsValid() {
+		return appErrors.NewWithMessage(appErrors.ErrCodeInvalidRequestData, "invalid product type")
+	}
+	if i.Urgency == "" {
+		i.Urgency = string(model.UrgencyNormal)
+	}
+	if !model.Urgency(i.Urgency).IsValid() {
+		return appErrors.NewWithMessage(appErrors.ErrCodeInvalidRequestData, "invalid urgency")
+	}
+
 	if i.City == "" {
 		return appErrors.NewWithMessage(appErrors.ErrCodeMissingRequiredField, "city is required")
 	}
@@ -206,8 +286,14 @@ func (i *CreateRequestInput) Validate() error {
 	if i.ContactPhone == "" {
 		return appErrors.NewWithMessage(appErrors.ErrCodeMissingRequiredField, "contact phone is required")
 	}
-	if i.UnitsNeeded <= 0 {
-		return appErrors.NewWithMessage(appErrors.ErrCodeInvalidRequestData, "units needed must be greater than 0")
+	if !IsValidPhone(i.ContactPhone) {
+		return appErrors.New(appErrors.ErrCodeInvalidPhoneNumber, nil)
+	}
+	if i.UnitsNeeded <= 0 || i.UnitsNeeded > 20 {
+		return appErrors.NewWithMessage(appErrors.ErrCodeInvalidRequestData, "units needed must be between 1 and 20")
+	}
+	if len(i.Description) > 1000 {
+		return appErrors.NewWithMessage(appErrors.ErrCodeInvalidRequestData, "description is too long")
 	}
 	return nil
 }

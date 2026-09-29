@@ -1,20 +1,21 @@
-version: '3.8'
-
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: emergency-blood-api
+    # Host port (HOST_PORT, default 1000) -> container port 8080
     ports:
-      - "1000:1000"
+      - "${HOST_PORT:-1000}:8080"
     env_file:
       - .env
     environment:
-      GOOGLE_APPLICATION_CREDENTIALS: /root/service_account.json
+      PORT: "8080"
+      ENV: production
+      # The key is mounted read-only at runtime and never baked into the image
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/service_account.json
     volumes:
-      - ./service_account.json:/root/service_account.json:ro
-      - ./.env:/root/.env
+      - ./service_account.json:/run/secrets/service_account.json:ro
     restart: unless-stopped
     networks:
       - blood-network

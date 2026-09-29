@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"acilkan.backend/internal/model"
 	"acilkan.backend/internal/notification"
@@ -62,27 +64,47 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, updates map
 	user, err := s.userRepo.GetByUID(ctx, uid)
 	if err != nil {
 		logger.Error("Failed to get user for update", zap.String("uid", uid), zap.Error(err))
-		return nil, err
+		if status.Code(err) == codes.NotFound {
+			return nil, appErrors.ErrUserNotFound()
+		}
+		return nil, appErrors.Wrap(appErrors.ErrCodeDatabaseError, err)
 	}
+
+	before := *user
 
 	// Apply updates
 	if fullName, ok := updates["full_name"].(string); ok {
-		user.FullName = fullName
+		user.FullName = strings.TrimSpace(fullName)
 	}
 	if phoneNumber, ok := updates["phone_number"].(string); ok {
+		phoneNumber = strings.TrimSpace(phoneNumber)
+		if phoneNumber != "" && !IsValidPhone(phoneNumber) {
+			return nil, appErrors.New(appErrors.ErrCodeInvalidPhoneNumber, nil)
+		}
 		user.PhoneNumber = phoneNumber
 	}
 	if bloodType, ok := updates["blood_type"].(string); ok {
-		user.BloodType = model.BloodType(bloodType)
+		bt, valid := model.ParseBloodType(bloodType)
+		if !valid {
+			return nil, appErrors.New(appErrors.ErrCodeInvalidBloodType, nil)
+		}
+		user.BloodType = bt
 	}
 	if city, ok := updates["city"].(string); ok {
-		user.City = city
+		user.City = strings.TrimSpace(city)
 	}
 	if isDonor, ok := updates["is_donor"].(bool); ok {
 		user.IsDonor = isDonor
 	}
 	if district, ok := updates["district"].(string); ok {
-		user.District = district
+		user.District = strings.TrimSpace(district)
+	}
+	if raw, ok := updates["last_donation_date"]; ok {
+		date, err := ParseDonationDate(raw, time.Now())
+		if err != nil {
+			return nil, appErrors.NewWithMessage(appErrors.ErrCodeInvalidUserData, err.Error())
+		}
+		user.LastDonationDate = date
 	}
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
@@ -90,8 +112,35 @@ func (s *UserService) UpdateProfile(ctx context.Context, uid string, updates map
 		return nil, err
 	}
 
+	s.syncTopics(ctx, &before, user)
+
 	logger.LogUserAction(uid, "profile_updated")
 	return user, nil
+}
+
+// isSubscribable reports whether a user should receive blood request notifications
+func isSubscribable(u *model.User) bool {
+	return u.IsDonor && u.BloodType != "" && u.City != "" && u.FCMToken != ""
+}
+
+// syncTopics moves the user's FCM subscriptions when donor status, blood type or city changes.
+// Failures are logged but do not fail the profile update.
+func (s *UserService) syncTopics(ctx context.Context, before, after *model.User) {
+	if before.IsDonor == after.IsDonor && before.BloodType == after.BloodType &&
+		before.City == after.City && before.FCMToken == after.FCMToken {
+		return
+	}
+
+	if isSubscribable(before) {
+		if err := s.fcmClient.UnsubscribeFromTopics(ctx, before.FCMToken, before.BloodType, before.City); err != nil {
+			logger.Error("Failed to unsubscribe old topics", zap.String("uid", after.UID), zap.Error(err))
+		}
+	}
+	if isSubscribable(after) {
+		if err := s.fcmClient.SubscribeToTopics(ctx, after.FCMToken, after.BloodType, after.City); err != nil {
+			logger.Error("Failed to subscribe new topics", zap.String("uid", after.UID), zap.Error(err))
+		}
+	}
 }
 
 // UpdateFCMToken updates the FCM token for push notifications
@@ -116,23 +165,21 @@ func (s *UserService) UpdateFCMToken(ctx context.Context, uid, token string) err
 		logger.Error("Failed to update FCM token", zap.String("uid", uid), zap.Error(err))
 		return appErrors.Wrap(appErrors.ErrCodeUserUpdateFailed, err)
 	}
-	
-	// Subscribe to topics if user is a donor and has blood type + city
-	if user.IsDonor && user.BloodType != "" && user.City != "" {
-		err = s.fcmClient.SubscribeToTopics(ctx, token, user.BloodType, user.City, user.District)
-		if err != nil {
-			logger.Error("Failed to subscribe to topics",
-				zap.String("uid", uid),
-				zap.String("blood_type", string(user.BloodType)),
-				zap.String("city", user.City),
-				zap.String("district", user.District),
-				zap.Error(err),
-			)
-			// Don't fail the request if topic subscription fails
-			// Token is still updated in database
+
+	// Move subscriptions from the old token (if any) to the new one.
+	// Topic subscription failures don't fail the request; the token is still saved.
+	before := *user
+	user.FCMToken = token
+	if before.FCMToken == token && isSubscribable(user) {
+		// Same token re-sent (e.g. app restart): re-subscribe, it is idempotent
+		// and repairs a subscription that failed earlier.
+		if err := s.fcmClient.SubscribeToTopics(ctx, token, user.BloodType, user.City); err != nil {
+			logger.Error("Failed to re-subscribe topics", zap.String("uid", uid), zap.Error(err))
 		}
+	} else {
+		s.syncTopics(ctx, &before, user)
 	}
-	
+
 	logger.LogUserAction(uid, "fcm_token_updated")
 	return nil
 }

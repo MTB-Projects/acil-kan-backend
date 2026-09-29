@@ -29,17 +29,14 @@ func (h *RequestHandler) CreateRequest(c *fiber.Ctx) error {
 
 	request, err := h.donationService.CreateRequest(c.Context(), uid, &input)
 	if err != nil {
-		if appErrors.IsAppError(err) {
-			appErr := appErrors.GetAppError(err)
-			return response.BadRequest(c, appErr.Code, appErr.Message)
-		}
-		return response.InternalServerError(c, appErrors.ErrCodeRequestCreationFailed, err.Error())
+		return writeError(c, err, appErrors.ErrCodeRequestCreationFailed)
 	}
 
 	return response.Created(c, request)
 }
 
-// GetActiveRequests returns all active blood requests with optional filters
+// GetActiveRequests returns all active blood requests with optional filters.
+// Public: personal data is stripped.
 // GET /api/v1/public/requests?city=Istanbul&district=Kadikoy&blood_type=A+
 func (h *RequestHandler) GetActiveRequests(c *fiber.Ctx) error {
 	// Parse query parameters for filtering
@@ -47,7 +44,7 @@ func (h *RequestHandler) GetActiveRequests(c *fiber.Ctx) error {
 	district := c.Query("district")
 	bloodType := c.Query("blood_type")
 
-	var requests []*model.BloodRequest
+	var requests []*model.PublicBloodRequest
 	var err error
 
 	// Use filtered query if any filter is provided
@@ -58,10 +55,20 @@ func (h *RequestHandler) GetActiveRequests(c *fiber.Ctx) error {
 	}
 
 	if err != nil {
-		return response.InternalServerError(c, appErrors.ErrCodeDatabaseError, "Failed to fetch requests")
+		return writeError(c, err, appErrors.ErrCodeDatabaseError)
 	}
 
 	return response.Success(c, requests)
+}
+
+// GetRequest returns a single active request with contact details
+// GET /api/v1/requests/:id
+func (h *RequestHandler) GetRequest(c *fiber.Ctx) error {
+	request, err := h.donationService.GetRequestContact(c.Context(), c.Params("id"))
+	if err != nil {
+		return writeError(c, err, appErrors.ErrCodeDatabaseError)
+	}
+	return response.Success(c, request)
 }
 
 // GetMyRequests returns all requests created by the authenticated user
@@ -71,7 +78,7 @@ func (h *RequestHandler) GetMyRequests(c *fiber.Ctx) error {
 
 	requests, err := h.donationService.GetUserRequests(c.Context(), uid)
 	if err != nil {
-		return response.InternalServerError(c, appErrors.ErrCodeDatabaseError, "Failed to fetch requests")
+		return writeError(c, err, appErrors.ErrCodeDatabaseError)
 	}
 
 	return response.Success(c, requests)
@@ -88,11 +95,7 @@ func (h *RequestHandler) CancelRequest(c *fiber.Ctx) error {
 	}
 
 	if err := h.donationService.CancelRequest(c.Context(), uid, requestID); err != nil {
-		if appErrors.IsAppError(err) {
-			appErr := appErrors.GetAppError(err)
-			return response.BadRequest(c, appErr.Code, appErr.Message)
-		}
-		return response.InternalServerError(c, appErrors.ErrCodeRequestUpdateFailed, err.Error())
+		return writeError(c, err, appErrors.ErrCodeRequestUpdateFailed)
 	}
 
 	return response.Success(c, fiber.Map{

@@ -10,6 +10,7 @@ import (
 
 	"acilkan.backend/config"
 	"acilkan.backend/internal/handler"
+	"acilkan.backend/internal/hospital"
 	"acilkan.backend/internal/notification"
 	"acilkan.backend/internal/repository"
 	"acilkan.backend/internal/router"
@@ -19,6 +20,7 @@ import (
 	"acilkan.backend/pkg/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"go.uber.org/zap"
 )
@@ -63,17 +65,42 @@ func main() {
 	// Initialize handlers
 	userHandler := handler.NewUserHandler(userService)
 	requestHandler := handler.NewRequestHandler(donationService)
+	institutionHandler := handler.NewInstitutionHandler(
+		service.NewInstitutionService(repository.NewInstitutionRepository(cfg.FirestoreClient), userRepo),
+	)
+
+	// Hospital directory (embedded OpenStreetMap data)
+	hospitals, err := hospital.Load()
+	if err != nil {
+		logger.Fatal("Failed to load hospital directory", zap.Error(err))
+	}
+	logger.Info("Hospital directory loaded", zap.Int("hospitals", hospitals.Len()))
+	hospitalHandler := handler.NewHospitalHandler(hospitals)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "Emergency Blood Donation API",
 		ErrorHandler: customErrorHandler,
+		BodyLimit:    64 * 1024,
 	})
 
 	// Global middleware
 	app.Use(recover.New())
+	// Per-IP rate limit as a basic abuse guard
+	app.Use(limiter.New(limiter.Config{
+		Max:        cfg.RateLimitPerMinute,
+		Expiration: time.Minute,
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() == "/health"
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return response.TooManyRequests(c, appErrors.ErrCodeTooManyRequests, appErrors.ErrorMessages[appErrors.ErrCodeTooManyRequests])
+		},
+	}))
+	// Mobile clients don't send Origin, so CORS only matters for browsers.
+	// Restrict via CORS_ALLOW_ORIGINS in production (comma separated).
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
+		AllowOrigins: cfg.CORSAllowOrigins,
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders: "Origin,Content-Type,Accept,Authorization",
 	}))
@@ -89,7 +116,13 @@ func main() {
 	app.Use(logger.HTTPMiddleware())
 
 	// Setup all routes
-	router.SetupRoutes(app, cfg, userHandler, requestHandler)
+	router.SetupRoutes(app, cfg, router.Handlers{
+		User:        userHandler,
+		Request:     requestHandler,
+		Hospital:    hospitalHandler,
+		Institution: institutionHandler,
+		Users:       userRepo,
+	})
 
 	// Start server in a goroutine
 	go func() {
@@ -155,8 +188,13 @@ func customErrorHandler(c *fiber.Ctx, err error) error {
 		zap.Error(err),
 	)
 
+	// Don't leak internal error details to clients; Fiber errors (404, 405...) are safe to show
+	message := appErrors.ErrorMessages[appErrors.ErrCodeInternalError]
+	if e, ok := err.(*fiber.Error); ok && code < fiber.StatusInternalServerError {
+		message = e.Message
+	}
 	return response.Error(c, code, &response.ErrorInfo{
 		Code:    appErrors.ErrCodeInternalError,
-		Message: err.Error(),
+		Message: message,
 	})
 }

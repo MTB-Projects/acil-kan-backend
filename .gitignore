@@ -21,6 +21,9 @@ serviceAccountKey.json
 *.json
 !go.mod
 !go.sum
+!firestore.indexes.json
+!firebase.json
+!internal/hospital/hospitals.json
 
 # IDE
 .idea/
@@ -45,3 +48,6 @@ temp/
 # Air (live reload)
 tmp/
 .air.toml
+
+# OpenStreetMap indirme önbelleği (scripts/osm/refresh.js)
+scripts/osm/.cache/

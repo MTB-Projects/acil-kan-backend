@@ -39,6 +39,7 @@ type User struct {
 	LastDonationDate *time.Time `firestore:"last_donation_date,omitempty" json:"last_donation_date,omitempty"`
 	FCMToken         string     `firestore:"fcm_token,omitempty" json:"fcm_token,omitempty"` // For push notifications
 	Roles            []UserRole `firestore:"roles" json:"roles"`
+	Institution      *Institution `firestore:"institution,omitempty" json:"institution,omitempty"` // set when verified
 	CreatedAt        time.Time  `firestore:"created_at" json:"created_at"`
 	UpdatedAt        time.Time  `firestore:"updated_at" json:"updated_at"`
 }
@@ -67,26 +68,17 @@ func (u *User) HasRole(role UserRole) bool {
 
 // IsCompatibleDonor checks if this user can donate to a specific blood type
 func (u *User) IsCompatibleDonor(recipientBloodType BloodType) bool {
-	compatibility := map[BloodType][]BloodType{
-		BloodTypeONegative:  {BloodTypeONegative, BloodTypeOPositive, BloodTypeANegative, BloodTypeAPositive, BloodTypeBNegative, BloodTypeBPositive, BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeOPositive:  {BloodTypeOPositive, BloodTypeAPositive, BloodTypeBPositive, BloodTypeABPositive},
-		BloodTypeANegative:  {BloodTypeANegative, BloodTypeAPositive, BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeAPositive:  {BloodTypeAPositive, BloodTypeABPositive},
-		BloodTypeBNegative:  {BloodTypeBNegative, BloodTypeBPositive, BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeBPositive:  {BloodTypeBPositive, BloodTypeABPositive},
-		BloodTypeABNegative: {BloodTypeABNegative, BloodTypeABPositive},
-		BloodTypeABPositive: {BloodTypeABPositive},
-	}
+	return u.BloodType.CanDonateTo(recipientBloodType)
+}
 
-	compatibleTypes, exists := compatibility[u.BloodType]
-	if !exists {
-		return false
-	}
+// IsVerifiedInstitution reports whether the user acts for a verified institution
+func (u *User) IsVerifiedInstitution() bool {
+	return u.HasRole(RoleInstitution) && u.Institution != nil
+}
 
-	for _, compatible := range compatibleTypes {
-		if compatible == recipientBloodType {
-			return true
-		}
+// AddRole adds role if the user doesn't already have it
+func (u *User) AddRole(role UserRole) {
+	if !u.HasRole(role) {
+		u.Roles = append(u.Roles, role)
 	}
-	return false
 }

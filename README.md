@@ -130,9 +130,24 @@ Returns API health status (no authentication required)
 
 #### Get Active Blood Requests
 ```
-GET /api/v1/public/requests
+GET /api/v1/public/requests?city=İstanbul&district=Kadıköy&blood_type=A+
 ```
-Returns all active blood donation requests
+Returns active blood donation requests. **No personal data** (patient name, contact phone,
+hospital address, user IDs) is included; use `GET /api/v1/requests/:id` when logged in.
+
+#### Search Hospitals (autocomplete)
+```
+GET /api/v1/public/hospitals?city=Ankara&district=Çankaya&q=sehir&limit=20
+```
+Matches the start of any word in the hospital name or district, ignoring case and Turkish
+letters (`sehir` finds "Şehir"). Names that start with the query come first. `district` is optional.
+Data is embedded in the binary from OpenStreetMap (© OpenStreetMap contributors, ODbL);
+regenerate with `node scripts/osm/refresh.js` (also writes the app's `assets/data/districts.json`).
+
+### Blood type format
+
+The API uses `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`. Inputs such as `A Rh+` or
+`0 Rh-` are accepted and normalized; anything else returns `VALIDATION_4002`.
 
 ### Protected Endpoints (Require Authentication)
 
@@ -156,9 +171,12 @@ Content-Type: application/json
   "phone_number": "+905551234567",
   "blood_type": "A+",
   "city": "Istanbul",
-  "is_donor": true
+  "is_donor": true,
+  "last_donation_date": "2026-06-01"
 }
 ```
+`last_donation_date` is optional (`YYYY-MM-DD`, not in the future; `""` or `null` clears it).
+Donors can donate again 90 days after it.
 
 **Update FCM Token**
 ```
@@ -180,7 +198,10 @@ Content-Type: application/json
 {
   "patient_name": "Jane Doe",
   "blood_type": "A+",
-  "city": "Istanbul",
+  "product_type": "WHOLE_BLOOD",
+  "urgency": "CRITICAL",
+  "city": "İstanbul",
+  "district": "Kadıköy",
   "hospital_name": "City Hospital",
   "hospital_address": "123 Main St",
   "contact_phone": "+905551234567",
@@ -188,6 +209,16 @@ Content-Type: application/json
   "description": "Urgent need for surgery"
 }
 ```
+- `product_type` (optional, default `WHOLE_BLOOD`): `WHOLE_BLOOD`, `ERYTHROCYTE`, `THROMBOCYTE`, `PLASMA`, `GRANULOCYTE`
+- `urgency` (optional, default `NORMAL`): `NORMAL`, `HIGH`, `CRITICAL`
+- A push notification is sent to donors of **every compatible blood type** in the same city
+  (e.g. an `A+` request reaches `A+`, `A-`, `O+`, `O-` donors).
+
+**Get Request With Contact Details**
+```
+GET /api/v1/requests/:id
+```
+Returns an active request including `patient_name`, `hospital_address` and `contact_phone`.
 
 **Get My Requests**
 ```
@@ -199,10 +230,40 @@ GET /api/v1/requests/my
 DELETE /api/v1/requests/:id
 ```
 
+### Verified Institutions
+
+Hospital blood centers, blood banks and NGOs can get a verified badge. Their requests show
+`verified_institution` (e.g. "Ankara Şehir Hastanesi Kan Merkezi") in lists, details and push
+notifications, and they may post up to 20 requests per 24 hours (regular users: 3).
+
+```
+POST /api/v1/institution/applications      # apply (applicant_name, applicant_title, institution_name,
+                                            #   type: HOSPITAL | BLOOD_CENTER | NGO, city, district,
+                                            #   official_phone, official_email, note)
+GET  /api/v1/institution/applications/me   # latest own application (null if none)
+
+# Admin only (role ADMIN)
+GET  /api/v1/admin/institution-applications?status=PENDING
+POST /api/v1/admin/institution-applications/:id/approve
+POST /api/v1/admin/institution-applications/:id/reject   {"reason": "..."}
+```
+
+Verification is done by a person: before approving, the admin calls the institution's official
+phone number to confirm the applicant. `institutional_email` in the admin list flags official
+domains (`.gov.tr`, `.edu.tr`, `.bel.tr`, `kizilay.org.tr`) as a hint only.
+
+Make someone an admin (they must have signed in to the app once):
+```bash
+go run scripts/set_admin.go someone@example.com
+go run scripts/set_admin.go --remove someone@example.com
+```
+
 ## 🔒 Security Features
 
 - **Firebase Token Verification**: All protected endpoints verify Firebase ID tokens
-- **Rate Limiting**: Maximum 3 blood requests per user per day
+- **Rate Limiting**: Maximum 3 blood requests per user per rolling 24 hours (cancelled ones included), plus a per-IP limit (`RATE_LIMIT_PER_MINUTE`)
+- **No Personal Data in Public Responses or Push Payloads**
+- **Secrets**: the service account key is mounted at runtime, never committed or baked into the Docker image
 - **Authorization Checks**: Users can only modify their own requests
 - **Input Validation**: Comprehensive validation on all inputs
 - **Structured Logging**: All actions logged with user context
