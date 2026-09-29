@@ -62,3 +62,18 @@ func TestRecipientTopicsCoverCompatibleDonors(t *testing.T) {
 		}
 	}
 }
+
+func TestNotificationText(t *testing.T) {
+	r := &model.BloodRequest{BloodType: model.BloodTypeONegative, HospitalName: "Acıbadem Kadıköy Hastanesi", City: "İstanbul", Urgency: model.UrgencyHigh}
+	title, body := NotificationText(r)
+	if title != "Acil O- kan ihtiyacı" || body != "Acıbadem Kadıköy Hastanesi · İstanbul" {
+		t.Errorf("got %q / %q", title, body)
+	}
+
+	r.Urgency = model.UrgencyCritical
+	r.VerifiedInstitution = "Acıbadem Kan Merkezi"
+	title, body = NotificationText(r)
+	if title != "Çok acil O- kan ihtiyacı" || body != "✓ Doğrulanmış kurum · Acıbadem Kadıköy Hastanesi · İstanbul" {
+		t.Errorf("got %q / %q", title, body)
+	}
+}

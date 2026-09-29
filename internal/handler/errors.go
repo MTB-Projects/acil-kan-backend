@@ -20,9 +20,10 @@ func writeError(c *fiber.Ctx, err error, fallbackCode string) error {
 
 	appErr := appErrors.GetAppError(err)
 	switch {
-	case appErr.Code == appErrors.ErrCodeUserNotFound, appErr.Code == appErrors.ErrCodeRequestNotFound:
+	case appErr.Code == appErrors.ErrCodeUserNotFound, appErr.Code == appErrors.ErrCodeRequestNotFound,
+		appErr.Code == appErrors.ErrCodeApplicationNotFound:
 		return response.NotFound(c, appErr.Code, appErr.Message)
-	case appErr.Code == appErrors.ErrCodeUnauthorizedAction:
+	case appErr.Code == appErrors.ErrCodeUnauthorizedAction, appErr.Code == appErrors.ErrCodeInsufficientPermission:
 		return response.Forbidden(c, appErr.Code, appErr.Message)
 	case appErr.Code == appErrors.ErrCodeRequestLimitExceeded:
 		return response.TooManyRequests(c, appErr.Code, appErr.Message)

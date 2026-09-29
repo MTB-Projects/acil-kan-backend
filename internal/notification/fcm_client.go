@@ -93,21 +93,24 @@ func RecipientTopics(request *model.BloodRequest) []string {
 // Topic payloads can be read by any subscriber, so no personal data is included;
 // the app fetches contact details from the authenticated API.
 func (f *FCMClient) SendBloodRequestNotificationToTopic(ctx context.Context, request *model.BloodRequest) error {
+	title, body := NotificationText(request)
+	data := map[string]string{
+		"type":          "blood_request",
+		"request_id":    request.ID,
+		"blood_type":    string(request.BloodType),
+		"city":          request.City,
+		"hospital_name": request.HospitalName,
+	}
+	if request.VerifiedInstitution != "" {
+		data["verified_institution"] = request.VerifiedInstitution
+	}
+
 	var messages []*messaging.Message
 	for _, topic := range RecipientTopics(request) {
 		messages = append(messages, &messaging.Message{
-			Topic: topic,
-			Notification: &messaging.Notification{
-				Title: fmt.Sprintf("Acil %s Kan İhtiyacı!", request.BloodType),
-				Body:  fmt.Sprintf("%s - %s hastanesinde kan ihtiyacı var", request.City, request.HospitalName),
-			},
-			Data: map[string]string{
-				"type":          "blood_request",
-				"request_id":    request.ID,
-				"blood_type":    string(request.BloodType),
-				"city":          request.City,
-				"hospital_name": request.HospitalName,
-			},
+			Topic:        topic,
+			Notification: &messaging.Notification{Title: title, Body: body},
+			Data:         data,
 			Android: &messaging.AndroidConfig{
 				Priority: "high",
 			},
@@ -144,4 +147,20 @@ func (f *FCMClient) SendBloodRequestNotificationToTopic(ctx context.Context, req
 		zap.Int("failed", resp.FailureCount),
 	)
 	return nil
+}
+
+// NotificationText builds the push title and body, e.g.
+// "Acil 0- kan ihtiyacı" / "Acıbadem Kadıköy Hastanesi · İstanbul".
+// Requests from verified institutions say so in the body.
+func NotificationText(r *model.BloodRequest) (title, body string) {
+	prefix := "Acil"
+	if r.Urgency == model.UrgencyCritical {
+		prefix = "Çok acil"
+	}
+	title = fmt.Sprintf("%s %s kan ihtiyacı", prefix, r.BloodType)
+	body = fmt.Sprintf("%s · %s", r.HospitalName, r.City)
+	if r.VerifiedInstitution != "" {
+		body = "✓ Doğrulanmış kurum · " + body
+	}
+	return title, body
 }

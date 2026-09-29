@@ -230,6 +230,34 @@ GET /api/v1/requests/my
 DELETE /api/v1/requests/:id
 ```
 
+### Verified Institutions
+
+Hospital blood centers, blood banks and NGOs can get a verified badge. Their requests show
+`verified_institution` (e.g. "Ankara Şehir Hastanesi Kan Merkezi") in lists, details and push
+notifications, and they may post up to 20 requests per 24 hours (regular users: 3).
+
+```
+POST /api/v1/institution/applications      # apply (applicant_name, applicant_title, institution_name,
+                                            #   type: HOSPITAL | BLOOD_CENTER | NGO, city, district,
+                                            #   official_phone, official_email, note)
+GET  /api/v1/institution/applications/me   # latest own application (null if none)
+
+# Admin only (role ADMIN)
+GET  /api/v1/admin/institution-applications?status=PENDING
+POST /api/v1/admin/institution-applications/:id/approve
+POST /api/v1/admin/institution-applications/:id/reject   {"reason": "..."}
+```
+
+Verification is done by a person: before approving, the admin calls the institution's official
+phone number to confirm the applicant. `institutional_email` in the admin list flags official
+domains (`.gov.tr`, `.edu.tr`, `.bel.tr`, `kizilay.org.tr`) as a hint only.
+
+Make someone an admin (they must have signed in to the app once):
+```bash
+go run scripts/set_admin.go someone@example.com
+go run scripts/set_admin.go --remove someone@example.com
+```
+
 ## 🔒 Security Features
 
 - **Firebase Token Verification**: All protected endpoints verify Firebase ID tokens

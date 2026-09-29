@@ -83,3 +83,44 @@ func TestParseDonationDate(t *testing.T) {
 		}
 	}
 }
+
+func validApply() *ApplyInput {
+	return &ApplyInput{
+		ApplicantName:   " Ayşe Yılmaz ",
+		ApplicantTitle:  "Kan merkezi sorumlusu",
+		InstitutionName: "Ankara Şehir Hastanesi Kan Merkezi",
+		Type:            string(model.InstitutionBloodCenter),
+		City:            "Ankara",
+		OfficialPhone:   "0312 552 60 00",
+	}
+}
+
+func TestApplyInputValidate(t *testing.T) {
+	in := validApply()
+	if err := in.Validate(); err != nil {
+		t.Fatalf("valid input rejected: %v", err)
+	}
+	if in.ApplicantName != "Ayşe Yılmaz" {
+		t.Errorf("not trimmed: %q", in.ApplicantName)
+	}
+
+	cases := map[string]func(*ApplyInput){
+		appErrors.ErrCodeMissingRequiredField: func(i *ApplyInput) { i.InstitutionName = "  " },
+		appErrors.ErrCodeValidationFailed:     func(i *ApplyInput) { i.Type = "PHARMACY" },
+		appErrors.ErrCodeInvalidPhoneNumber:   func(i *ApplyInput) { i.OfficialPhone = "112" },
+	}
+	for wantCode, mutate := range cases {
+		in := validApply()
+		mutate(in)
+		err := in.Validate()
+		if err == nil || appErrors.GetAppError(err).Code != wantCode {
+			t.Errorf("want %s, got %v", wantCode, err)
+		}
+	}
+
+	bad := validApply()
+	bad.OfficialEmail = "adres-yok"
+	if bad.Validate() == nil {
+		t.Error("invalid e-mail accepted")
+	}
+}

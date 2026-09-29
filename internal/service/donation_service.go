@@ -18,6 +18,8 @@ import (
 
 const (
 	MaxRequestsPerDay        = 3
+	// Doğrulanmış kurumlar (hastane kan merkezleri) gün içinde çok sayıda ilan verebilir
+	MaxRequestsPerDayInstitution = 20
 	DefaultRequestExpiration = 48 * time.Hour // 48 hours
 )
 
@@ -68,9 +70,13 @@ func (s *DonationService) CreateRequest(ctx context.Context, uid string, req *Cr
 		logger.Error("Failed to count user requests", zap.String("uid", uid), zap.Error(err))
 		return nil, appErrors.Wrap(appErrors.ErrCodeDatabaseError, err)
 	}
-	if count >= MaxRequestsPerDay {
+	limit := MaxRequestsPerDay
+	if requester.IsVerifiedInstitution() {
+		limit = MaxRequestsPerDayInstitution
+	}
+	if count >= limit {
 		logger.Warn("User exceeded daily request limit", zap.String("uid", uid), zap.Int("count", count))
-		return nil, appErrors.ErrRequestLimitExceeded(MaxRequestsPerDay)
+		return nil, appErrors.ErrRequestLimitExceeded(limit)
 	}
 
 	// Create blood request
@@ -91,6 +97,9 @@ func (s *DonationService) CreateRequest(ctx context.Context, uid string, req *Cr
 		Description:     req.Description,
 		Status:          model.RequestStatusActive,
 		ExpiresAt:       time.Now().Add(DefaultRequestExpiration),
+	}
+	if requester.IsVerifiedInstitution() {
+		bloodRequest.VerifiedInstitution = requester.Institution.Name
 	}
 
 	if err := s.requestRepo.Create(ctx, bloodRequest); err != nil {

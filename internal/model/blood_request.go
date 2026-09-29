@@ -71,6 +71,8 @@ type BloodRequest struct {
 	CreatedAt        time.Time     `firestore:"created_at" json:"created_at"`
 	UpdatedAt        time.Time     `firestore:"updated_at" json:"updated_at"`
 	NotifiedUserUIDs []string      `firestore:"notified_user_uids,omitempty" json:"notified_user_uids,omitempty"` // Track who was notified
+	// Name of the verified institution that posted the request; empty for regular users
+	VerifiedInstitution string `firestore:"verified_institution,omitempty" json:"verified_institution,omitempty"`
 }
 
 // PublicBloodRequest is the view of a request that anyone can see without logging in.
@@ -87,6 +89,8 @@ type PublicBloodRequest struct {
 	Description  string      `json:"description"`
 	ExpiresAt    time.Time   `json:"expires_at"`
 	CreatedAt    time.Time   `json:"created_at"`
+	// Verified institution badge, e.g. "Ankara Şehir Hastanesi Kan Merkezi"
+	VerifiedInstitution string `json:"verified_institution,omitempty"`
 }
 
 // ToPublic strips personal data from the request
@@ -103,6 +107,8 @@ func (r *BloodRequest) ToPublic() *PublicBloodRequest {
 		Description:  r.Description,
 		ExpiresAt:    r.ExpiresAt,
 		CreatedAt:    r.CreatedAt,
+
+		VerifiedInstitution: r.VerifiedInstitution,
 	}
 }
 

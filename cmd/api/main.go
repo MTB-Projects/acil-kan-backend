@@ -65,6 +65,9 @@ func main() {
 	// Initialize handlers
 	userHandler := handler.NewUserHandler(userService)
 	requestHandler := handler.NewRequestHandler(donationService)
+	institutionHandler := handler.NewInstitutionHandler(
+		service.NewInstitutionService(repository.NewInstitutionRepository(cfg.FirestoreClient), userRepo),
+	)
 
 	// Hospital directory (embedded OpenStreetMap data)
 	hospitals, err := hospital.Load()
@@ -113,7 +116,13 @@ func main() {
 	app.Use(logger.HTTPMiddleware())
 
 	// Setup all routes
-	router.SetupRoutes(app, cfg, userHandler, requestHandler, hospitalHandler)
+	router.SetupRoutes(app, cfg, router.Handlers{
+		User:        userHandler,
+		Request:     requestHandler,
+		Hospital:    hospitalHandler,
+		Institution: institutionHandler,
+		Users:       userRepo,
+	})
 
 	// Start server in a goroutine
 	go func() {

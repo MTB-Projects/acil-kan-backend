@@ -49,6 +49,12 @@ const (
 	ErrCodeFCMError           = "NOTIFICATION_6002"
 	ErrCodeNoEligibleDonors   = "NOTIFICATION_6003"
 
+	// Institution verification (7xxx)
+	ErrCodeApplicationNotFound    = "INSTITUTION_7001"
+	ErrCodeApplicationPending     = "INSTITUTION_7002"
+	ErrCodeAlreadyVerified        = "INSTITUTION_7003"
+	ErrCodeApplicationReviewed    = "INSTITUTION_7004"
+
 	// General Errors (9xxx)
 	ErrCodeInternalError    = "GENERAL_9001"
 	ErrCodeServiceUnavailable = "GENERAL_9002"
@@ -102,6 +108,12 @@ var ErrorMessages = map[string]string{
 	ErrCodeNotificationFailed: "Failed to send notification",
 	ErrCodeFCMError:           "Firebase Cloud Messaging error",
 	ErrCodeNoEligibleDonors:   "No eligible donors found",
+
+	// Institution verification
+	ErrCodeApplicationNotFound: "Institution application not found",
+	ErrCodeApplicationPending:  "You already have a pending institution application",
+	ErrCodeAlreadyVerified:     "This account is already a verified institution",
+	ErrCodeApplicationReviewed: "This application has already been reviewed",
 
 	// General
 	ErrCodeInternalError:    "Internal server error",

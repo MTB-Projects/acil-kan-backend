@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"acilkan.backend/config"
+	"acilkan.backend/internal/model"
+	"acilkan.backend/internal/repository"
 	appErrors "acilkan.backend/pkg/errors"
 	"acilkan.backend/pkg/response"
 	"github.com/gofiber/fiber/v2"
@@ -58,4 +60,18 @@ func GetUserEmail(c *fiber.Ctx) string {
 		return ""
 	}
 	return email
+}
+
+// RequireRole allows the request only if the authenticated user has role.
+// Must run after FirebaseAuthMiddleware. Roles live in Firestore, not in the token,
+// so a revoked admin loses access on the next request.
+func RequireRole(users *repository.UserRepository, role model.UserRole) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		user, err := users.GetByUID(c.Context(), GetUserUID(c))
+		if err != nil || !user.HasRole(role) {
+			return response.Forbidden(c, appErrors.ErrCodeInsufficientPermission,
+				appErrors.ErrorMessages[appErrors.ErrCodeInsufficientPermission])
+		}
+		return c.Next()
+	}
 }
